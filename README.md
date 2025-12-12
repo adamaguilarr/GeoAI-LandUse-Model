@@ -48,10 +48,17 @@ Classes:
 - Data augmentation  
 - Hyperparameter tuning  
 
-### Phase 3 — GeoAI Extensions (optional)
+### Phase 3 — GeoAI Extensions
 - Visualizing predictions on a map  
 - Generating land-use overlays  
 - Exporting results to GeoJSON or shapefile format  
 - Building a small inference API (FastAPI)
 
 ---
+
+## Current Results
+- Test Accuracy ≈ 0.84
+- Biggest Confusions:
+    - HerbaceousVegetation - Pasture
+    - Highway - Industrial
+    - PermanentCrop - AnnualCrop
