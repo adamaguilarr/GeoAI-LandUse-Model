@@ -62,3 +62,5 @@ Classes:
     - HerbaceousVegetation - Pasture
     - Highway - Industrial
     - PermanentCrop - AnnualCrop
+
+The CNN achieves strong performance on the EuroSAT dataset, with particularly high accuracy on Forest, Residential, Industrial, and SeaLake classes. Most misclassifications occur between semantically similar land-use types, such as AnnualCrop vs PermanentCrop and Highway vs River, reflecting inherent ambiguity at the given spatial resolution.
