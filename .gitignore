@@ -238,3 +238,5 @@ env/
 # Ignore cache
 __pycache__/
 *.pyc
+
+notebooks/models/
