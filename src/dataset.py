@@ -8,16 +8,33 @@ from torchvision import datasets, transforms
 
 def get_default_transforms(img_size: int = 64):
     """
-    Returns train and eval transforms for EuroSAT RGB images.
+    Returns train (augmented) and eval transforms for EuroSAT RGB images.
+    Train gets augmentation; val/test stay deterministic.
     """
     train_transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
+
+        # Augmentations (train only)
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=25),
+        transforms.RandomAffine(
+            degrees=0,
+            translate=(0.08, 0.08),
+            scale=(0.95, 1.05),
+            shear=5
+        ),
+        transforms.ColorJitter(
+            brightness=0.15,
+            contrast=0.15,
+            saturation=0.10,
+            hue=0.02
+        ),
+
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],  # standard ImageNet means
-            std=[0.229, 0.224, 0.225]
+            mean=[0.485, 0.456, 0.406],  # ImageNet means
+            std=[0.229, 0.224, 0.225],
         )
     ])
 
@@ -26,7 +43,7 @@ def get_default_transforms(img_size: int = 64):
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
+            std=[0.229, 0.224, 0.225],
         )
     ])
 
@@ -75,9 +92,17 @@ def load_eurosat_dataset(
         generator=generator
     )
 
-    # Use eval transforms for val/test
-    val_dataset.dataset.transform = eval_transform
-    test_dataset.dataset.transform = eval_transform
+    # IMPORTANT:
+    # random_split returns Subset objects that reference the SAME underlying dataset.
+    # If we set val_dataset.dataset.transform, it changes it for train too.
+    # So we create separate datasets for val/test using the same root but eval_transform.
+
+    val_dataset_full = datasets.ImageFolder(root=str(data_dir), transform=eval_transform)
+    test_dataset_full = datasets.ImageFolder(root=str(data_dir), transform=eval_transform)
+
+    # Rebuild subsets with same indices
+    val_dataset = torch.utils.data.Subset(val_dataset_full, val_dataset.indices)
+    test_dataset = torch.utils.data.Subset(test_dataset_full, test_dataset.indices)
 
     # DataLoaders
     train_loader = DataLoader(

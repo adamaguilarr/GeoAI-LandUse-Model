@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
 from src.dataset import load_eurosat_dataset
@@ -19,7 +20,7 @@ def train_model(
     batch_size=64,
     img_size=64,
     device=None,
-    save_best=True,  # save best val-acc model
+    save_best=True,
 ):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -35,10 +36,20 @@ def train_model(
     criterion = nn.CrossEntropyLoss()
     optimizer = Adam(model.parameters(), lr=lr)
 
-    save_path = PROJECT_ROOT / "models" / "simple_cnn.pth"
+    save_path = PROJECT_ROOT / "models" / "simple_cnn_v2.pth"
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
+    last_path = PROJECT_ROOT / "models" / "simple_cnn_v2_last.pth"
+
     best_val_acc = -1.0
+
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=2,
+        verbose=True
+    )
 
     for epoch in range(epochs):
         # -------- Training --------
@@ -73,21 +84,28 @@ def train_model(
 
         val_acc = correct / max(1, total)
 
+        current_lr = optimizer.param_groups[0]["lr"]
         print(
             f"Epoch {epoch+1} | "
             f"Train Loss: {train_loss:.4f} | "
-            f"Val Acc: {val_acc:.4f}"
+            f"Val Acc: {val_acc:.4f} | "
+            f"LR: {current_lr:.2e}"
         )
 
-        # -------- Save model --------
-        if save_best:
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                torch.save(model.state_dict(), save_path)
-                print(f"Saved BEST model so far to {save_path} (val_acc={best_val_acc:.4f})")
-        else:
+        scheduler.step(val_acc)
+
+        # Always save last epoch weights
+        torch.save(model.state_dict(), last_path)
+
+        # Save best weights
+        if save_best and val_acc > best_val_acc:
+            best_val_acc = val_acc
             torch.save(model.state_dict(), save_path)
-            print(f"Saved model to {save_path}")
+            print(f"Saved BEST model so far to {save_path} (val_acc={best_val_acc:.4f})")
+
+    if save_best and save_path.exists():
+        model.load_state_dict(torch.load(save_path, map_location=device))
+        model.eval()
 
     print(f"Done. Best Val Acc: {best_val_acc:.4f}" if save_best else "Done.")
     return model, class_names
