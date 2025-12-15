@@ -6,46 +6,93 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
 
-def get_default_transforms(img_size: int = 64):
+def get_transforms(img_size: int = 64, aug_level: str = "light"):
     """
-    Returns train (augmented) and eval transforms for EuroSAT RGB images.
-    Train gets augmentation; val/test stay deterministic.
+    Returns (train_transform, eval_transform).
+
+    aug_level: "none" | "light" | "medium" | "heavy"
     """
-    train_transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
+    aug_level = (aug_level or "light").lower()
 
-        # Augmentations (train only)
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.RandomRotation(degrees=25),
-        transforms.RandomAffine(
-            degrees=0,
-            translate=(0.08, 0.08),
-            scale=(0.95, 1.05),
-            shear=5
-        ),
-        transforms.ColorJitter(
-            brightness=0.15,
-            contrast=0.15,
-            saturation=0.10,
-            hue=0.02
-        ),
-
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],  # ImageNet means
-            std=[0.229, 0.224, 0.225],
-        )
-    ])
-
+    # Always deterministic for val/test
     eval_transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225],
-        )
+        ),
     ])
+
+    if aug_level == "none":
+        train_transform = eval_transform
+
+    elif aug_level == "light":
+        train_transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(degrees=15),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ])
+
+    elif aug_level == "medium":
+        train_transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(degrees=25),
+            transforms.RandomAffine(
+                degrees=0,
+                translate=(0.08, 0.08),
+                scale=(0.95, 1.05),
+                shear=5
+            ),
+            transforms.ColorJitter(
+                brightness=0.15,
+                contrast=0.15,
+                saturation=0.10,
+                hue=0.02
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ])
+
+    elif aug_level == "heavy":
+        train_transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(degrees=35),
+            transforms.RandomAffine(
+                degrees=0,
+                translate=(0.12, 0.12),
+                scale=(0.90, 1.10),
+                shear=10
+            ),
+            transforms.ColorJitter(
+                brightness=0.25,
+                contrast=0.25,
+                saturation=0.20,
+                hue=0.05
+            ),
+            transforms.RandomGrayscale(p=0.05),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ])
+
+    else:
+        raise ValueError(f"Unknown aug_level='{aug_level}'. Use: none/light/medium/heavy")
 
     return train_transform, eval_transform
 
@@ -57,56 +104,50 @@ def load_eurosat_dataset(
     test_split: float = 0.15,
     batch_size: int = 64,
     num_workers: int = 0,
-    seed: int = 42
+    seed: int = 42,
+    aug_level: str = "light",
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
     """
-    Loads the EuroSAT RGB dataset from a directory structured like:
+    Loads EuroSAT RGB dataset from:
         data_dir/
             AnnualCrop/
             Forest/
             ...
             SeaLake/
 
-    Returns train, val, test dataloaders and class names.
+    Returns: train_loader, val_loader, test_loader, class_names
     """
 
     data_dir = Path(data_dir)
     assert data_dir.exists(), f"Data directory does not exist: {data_dir}"
 
-    train_transform, eval_transform = get_default_transforms(img_size)
+    train_transform, eval_transform = get_transforms(img_size=img_size, aug_level=aug_level)
 
-    # ImageFolder expects subfolders by class
-    full_dataset = datasets.ImageFolder(root=str(data_dir), transform=train_transform)
-    class_names = full_dataset.classes
+    # Full dataset used only for indices/splits (train transform for train)
+    full_train_dataset = datasets.ImageFolder(root=str(data_dir), transform=train_transform)
+    class_names = full_train_dataset.classes
 
-    # Split sizes
-    total_size = len(full_dataset)
+    total_size = len(full_train_dataset)
     val_size = int(val_split * total_size)
     test_size = int(test_split * total_size)
     train_size = total_size - val_size - test_size
 
     generator = torch.Generator().manual_seed(seed)
-    train_dataset, val_dataset, test_dataset = random_split(
-        full_dataset,
+    train_subset, val_subset, test_subset = random_split(
+        full_train_dataset,
         [train_size, val_size, test_size],
         generator=generator
     )
 
-    # IMPORTANT:
-    # random_split returns Subset objects that reference the SAME underlying dataset.
-    # If we set val_dataset.dataset.transform, it changes it for train too.
-    # So we create separate datasets for val/test using the same root but eval_transform.
+    # IMPORTANT: val/test must use eval transforms.
+    # Create separate datasets and reuse the same indices.
+    full_eval_dataset = datasets.ImageFolder(root=str(data_dir), transform=eval_transform)
 
-    val_dataset_full = datasets.ImageFolder(root=str(data_dir), transform=eval_transform)
-    test_dataset_full = datasets.ImageFolder(root=str(data_dir), transform=eval_transform)
+    val_dataset = torch.utils.data.Subset(full_eval_dataset, val_subset.indices)
+    test_dataset = torch.utils.data.Subset(full_eval_dataset, test_subset.indices)
 
-    # Rebuild subsets with same indices
-    val_dataset = torch.utils.data.Subset(val_dataset_full, val_dataset.indices)
-    test_dataset = torch.utils.data.Subset(test_dataset_full, test_dataset.indices)
-
-    # DataLoaders
     train_loader = DataLoader(
-        train_dataset,
+        train_subset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers
