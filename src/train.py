@@ -31,8 +31,8 @@ def train_model(
     img_size=64,
     device=None,
     save_best=True,
-    seed=42,              # NEW: lock dataset split + reproducibility
-    aug_level="light",    # keep your aug switch here
+    seed=42,              
+    aug_level="light",    
 ):
     seed_everything(seed)
 
