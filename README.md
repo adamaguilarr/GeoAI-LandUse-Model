@@ -57,7 +57,7 @@ Classes:
 ---
 
 ## Current Results
-- Test Accuracy ≈ 0.84
+- Test Accuracy ≈ 0.94
 - Biggest Confusions:
     - HerbaceousVegetation - Pasture
     - Highway - Industrial
