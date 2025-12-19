@@ -1,5 +1,6 @@
 from pathlib import Path
 import random
+from typing import Optional, Tuple, List, Dict, Any
 
 import torch
 import torch.nn as nn
@@ -18,29 +19,33 @@ def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    # Optional: more reproducible, slightly slower
+    # Optional: more reproducible, slightly slower (mostly matters on GPU)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
 def train_model(
     data_dir,
-    epochs=5,
-    lr=1e-3,
-    batch_size=64,
-    img_size=64,
-    device=None,
-    save_best=True,
-    seed=42,              
-    aug_level="light",    
-):
+    epochs: int = 15,
+    lr: float = 1e-3,
+    batch_size: int = 64,
+    img_size: int = 64,
+    device: Optional[str] = None,
+    save_best: bool = True,
+    seed: int = 42,
+    aug_level: str = "light",
+    weight_decay: float = 1e-4,
+    label_smoothing: float = 0.05,
+    early_stop_patience: int = 4,          # stop if no val improvement for N epochs
+    min_delta: float = 1e-4,               # required improvement to reset patience
+) -> Tuple[torch.nn.Module, List[str]]:
     seed_everything(seed)
 
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Using device:", device)
 
-    # IMPORTANT: pass seed so train/val/test split is stable
+    # Stable splits + augment control live in dataset.py
     train_loader, val_loader, test_loader, class_names = load_eurosat_dataset(
         data_dir=data_dir,
         img_size=img_size,
@@ -50,16 +55,19 @@ def train_model(
     )
 
     model = build_model(num_classes=len(class_names)).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=lr)
 
-    save_path = PROJECT_ROOT / "models" / "simple_cnn_v2_best.pth"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
+    # Label smoothing is a small but often real win
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
-    # Optional: also save a tiny metadata file to avoid confusion later
-    meta_path = save_path.with_suffix(".meta.pt")
+    optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    best_val_acc = -1.0
+    models_dir = PROJECT_ROOT / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save both "best" and "last" so you always have something to inspect
+    best_path = models_dir / "simple_cnn_v2_best.pth"
+    last_path = models_dir / "simple_cnn_v2_last.pth"
+    meta_path = best_path.with_suffix(".meta.pt")
 
     scheduler = ReduceLROnPlateau(
         optimizer,
@@ -71,6 +79,8 @@ def train_model(
     def get_lr(opt):
         return opt.param_groups[0]["lr"]
 
+    best_val_acc = -1.0
+    epochs_no_improve = 0
     current_lr = get_lr(optimizer)
 
     for epoch in range(epochs):
@@ -113,6 +123,10 @@ def train_model(
             f"LR: {current_lr:.2e}"
         )
 
+        # Always save "last"
+        torch.save(model.state_dict(), last_path)
+
+        # Scheduler step on val metric
         scheduler.step(val_acc)
 
         new_lr = get_lr(optimizer)
@@ -120,32 +134,42 @@ def train_model(
             current_lr = new_lr
             print(f"LR changed -> {current_lr:.2e}")
 
-        # -------- Save model --------
-        if save_best:
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+        # -------- Save best / early stopping --------
+        improved = (val_acc - best_val_acc) > min_delta
 
-                torch.save(model.state_dict(), save_path)
-                torch.save(
-                    {
-                        "class_names": class_names,
-                        "img_size": img_size,
-                        "batch_size": batch_size,
-                        "seed": seed,
-                        "aug_level": aug_level,
-                        "best_val_acc": best_val_acc,
-                    },
-                    meta_path
-                )
+        if save_best and improved:
+            best_val_acc = val_acc
+            epochs_no_improve = 0
 
-                print(f"Saved BEST model so far to {save_path} (val_acc={best_val_acc:.4f})")
+            torch.save(model.state_dict(), best_path)
+            torch.save(
+                {
+                    "class_names": class_names,
+                    "img_size": img_size,
+                    "batch_size": batch_size,
+                    "seed": seed,
+                    "aug_level": aug_level,
+                    "epochs_trained": epoch + 1,
+                    "lr_init": lr,
+                    "weight_decay": weight_decay,
+                    "label_smoothing": label_smoothing,
+                    "best_val_acc": float(best_val_acc),
+                    "best_path": str(best_path),
+                    "last_path": str(last_path),
+                },
+                meta_path,
+            )
+            print(f"Saved BEST model so far to {best_path} (val_acc={best_val_acc:.4f})")
         else:
-            torch.save(model.state_dict(), save_path)
-            print(f"Saved model to {save_path}")
+            epochs_no_improve += 1
 
-    # NEW: load best weights back into the model before returning
-    if save_best and save_path.exists():
-        model.load_state_dict(torch.load(save_path, map_location=device))
+        if save_best and early_stop_patience is not None and epochs_no_improve >= early_stop_patience:
+            print(f"Early stopping: no val improvement for {early_stop_patience} epoch(s).")
+            break
+
+    # Load best weights back into the returned model
+    if save_best and best_path.exists():
+        model.load_state_dict(torch.load(best_path, map_location=device))
         model.eval()
 
     print(f"Done. Best Val Acc: {best_val_acc:.4f}")
