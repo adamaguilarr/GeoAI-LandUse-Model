@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torchvision.models as models
 
 
 class ConvBlock(nn.Module):
@@ -32,7 +33,6 @@ class SimpleCNNv2(nn.Module):
             ConvBlock(128, 256, dropout=dropout),
         )
 
-        # Global Average Pooling -> no giant flatten
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.classifier = nn.Sequential(
@@ -48,5 +48,27 @@ class SimpleCNNv2(nn.Module):
         return x
 
 
-def build_model(num_classes: int = 10, dropout=0.25):
-    return SimpleCNNv2(num_classes=num_classes, dropout=dropout)
+def build_model(
+    num_classes: int,
+    model_name: str = "cnn_v2",
+    dropout: float = 0.25,
+    pretrained: bool = True,
+    freeze_backbone: bool = False,
+):
+    if model_name == "cnn_v2":
+        return SimpleCNNv2(num_classes=num_classes, dropout=dropout)
+
+    if model_name == "resnet18":
+        model = models.resnet18(pretrained=pretrained)
+
+        # Replace final layer
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+
+        if freeze_backbone:
+            for name, param in model.named_parameters():
+                if not name.startswith("fc"):
+                    param.requires_grad = False
+
+        return model
+
+    raise ValueError(f"Unknown model_name: {model_name}")

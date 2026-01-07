@@ -19,7 +19,6 @@ def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    # Optional: more reproducible, slightly slower (mostly matters on GPU)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -38,6 +37,10 @@ def train_model(
     label_smoothing: float = 0.05,
     early_stop_patience: int = 4,          # stop if no val improvement for N epochs
     min_delta: float = 1e-4,               # required improvement to reset patience
+    model_name: str = "cnn_v2",
+    pretrained: bool = True,
+    freeze_backbone: bool = False,
+    dropout: float = 0.25,
 ) -> Tuple[torch.nn.Module, List[str]]:
     seed_everything(seed)
 
@@ -54,7 +57,13 @@ def train_model(
         aug_level=aug_level,
     )
 
-    model = build_model(num_classes=len(class_names)).to(device)
+    model = build_model(
+        num_classes=len(class_names),
+        model_name=model_name,
+        dropout=dropout,
+        pretrained=pretrained,
+        freeze_backbone=freeze_backbone,
+    ).to(device)
 
     # Label smoothing is a small but often real win
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
