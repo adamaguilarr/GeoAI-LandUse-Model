@@ -64,3 +64,16 @@ Classes:
     - PermanentCrop - AnnualCrop
 
 The CNN achieves strong performance on the EuroSAT dataset, with particularly high accuracy on Forest, Residential, Industrial, and SeaLake classes. Most misclassifications occur between semantically similar land-use types, such as AnnualCrop vs PermanentCrop and Highway vs River, reflecting inherent ambiguity at the given spatial resolution.
+
+## Current Status
+
+Completed:
+- Data exploration and preprocessing
+- Baseline CNN training and evaluation
+- Improved CNN architecture with data augmentation
+- Transfer learning experiment using ResNet
+- Model evaluation with confusion matrices
+
+In progress:
+- Model comparison and error analysis
+- Additional experiments and refinement
