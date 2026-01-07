@@ -73,7 +73,7 @@ def train_model(
     models_dir = PROJECT_ROOT / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save both "best" and "last" so you always have something to inspect
+    # Save both "best" and "last"
     best_path = models_dir / "simple_cnn_v2_best.pth"
     last_path = models_dir / "simple_cnn_v2_last.pth"
     meta_path = best_path.with_suffix(".meta.pt")
@@ -93,7 +93,7 @@ def train_model(
     current_lr = get_lr(optimizer)
 
     for epoch in range(epochs):
-        # -------- Training --------
+        # Training
         model.train()
         running_loss = 0.0
 
@@ -110,7 +110,7 @@ def train_model(
 
         train_loss = running_loss / max(1, len(train_loader))
 
-        # -------- Validation --------
+        # Validation
         model.eval()
         correct = 0
         total = 0
@@ -143,7 +143,7 @@ def train_model(
             current_lr = new_lr
             print(f"LR changed -> {current_lr:.2e}")
 
-        # -------- Save best / early stopping --------
+        # Save best / early stopping
         improved = (val_acc - best_val_acc) > min_delta
 
         if save_best and improved:
