@@ -1,5 +1,7 @@
 import torch.nn as nn
-import torchvision.models as models
+
+# Only needed for transfer learning models
+from torchvision.models import resnet18, ResNet18_Weights
 
 
 class ConvBlock(nn.Module):
@@ -49,25 +51,30 @@ class SimpleCNNv2(nn.Module):
 
 
 def build_model(
-    num_classes: int,
-    model_name: str = "cnn_v2",
-    dropout: float = 0.25,
+    num_classes: int = 10,
+    model_name: str = "simple_cnn_v2",
     pretrained: bool = True,
     freeze_backbone: bool = False,
+    dropout: float = 0.25,
 ):
-    if model_name == "cnn_v2":
+    model_name = (model_name or "simple_cnn_v2").lower()
+
+    if model_name in ["simple_cnn_v2", "simplecnn", "cnn"]:
         return SimpleCNNv2(num_classes=num_classes, dropout=dropout)
 
     if model_name == "resnet18":
-        model = models.resnet18(pretrained=pretrained)
+        weights = ResNet18_Weights.DEFAULT if pretrained else None
+        model = resnet18(weights=weights)
 
-        # Replace final layer
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        # Replace classifier head
+        in_features = model.fc.in_features
+        model.fc = nn.Linear(in_features, num_classes)
 
         if freeze_backbone:
-            for name, param in model.named_parameters():
-                if not name.startswith("fc"):
-                    param.requires_grad = False
+            for p in model.parameters():
+                p.requires_grad = False
+            for p in model.fc.parameters():
+                p.requires_grad = True
 
         return model
 

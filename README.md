@@ -57,23 +57,17 @@ Classes:
 ---
 
 ## Current Results
-- Test Accuracy ≈ 0.94
-- Biggest Confusions:
-    - HerbaceousVegetation - Pasture
-    - Highway - Industrial
-    - PermanentCrop - AnnualCrop
 
-The CNN achieves strong performance on the EuroSAT dataset, with particularly high accuracy on Forest, Residential, Industrial, and SeaLake classes. Most misclassifications occur between semantically similar land-use types, such as AnnualCrop vs PermanentCrop and Highway vs River, reflecting inherent ambiguity at the given spatial resolution.
+### Baseline CNN (SimpleCNN v2)
+- Test Accuracy: **~0.94**
+- Strong performance on Forest, Residential, Industrial, and SeaLake
+- Primary confusions occur between visually similar classes:
+  - PermanentCrop vs AnnualCrop  
+  - HerbaceousVegetation vs Pasture  
+  - Highway vs Industrial  
 
-## Current Status
-
-Completed:
-- Data exploration and preprocessing
-- Baseline CNN training and evaluation
-- Improved CNN architecture with data augmentation
-- Transfer learning experiment using ResNet
-- Model evaluation with confusion matrices
-
-In progress:
-- Model comparison and error analysis
-- Additional experiments and refinement
+### Transfer Learning (ResNet18)
+- Frozen backbone: ~0.80 test accuracy
+- Fine-tuned backbone: **~0.97 test accuracy**
+- Significant improvement across all classes after fine-tuning
+- Remaining errors largely reflect semantic ambiguity at 64×64 resolution

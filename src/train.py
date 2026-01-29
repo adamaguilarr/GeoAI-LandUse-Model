@@ -1,6 +1,6 @@
 from pathlib import Path
 import random
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List
 
 import torch
 import torch.nn as nn
@@ -19,8 +19,23 @@ def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+    # More reproducible (mostly matters on GPU)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def _make_run_stem(model_name: str, pretrained: bool, freeze_backbone: bool) -> str:
+    # This creates names like:
+    # resnet18_pre_frozen
+    # resnet18_pre_ft
+    # simple_cnn_v2
+    model_name = (model_name or "simple_cnn_v2").lower()
+    if model_name in ["simple_cnn_v2", "simplecnn", "cnn"]:
+        return "simple_cnn_v2"
+
+    pre = "pre" if pretrained else "scratch"
+    frz = "frozen" if freeze_backbone else "ft"
+    return f"{model_name}_{pre}_{frz}"
 
 
 def train_model(
@@ -35,12 +50,12 @@ def train_model(
     aug_level: str = "light",
     weight_decay: float = 1e-4,
     label_smoothing: float = 0.05,
-    early_stop_patience: int = 4,          # stop if no val improvement for N epochs
-    min_delta: float = 1e-4,               # required improvement to reset patience
-    model_name: str = "cnn_v2",
+    early_stop_patience: int = 4,
+    min_delta: float = 1e-4,
+    # NEW for transfer learning:
+    model_name: str = "simple_cnn_v2",
     pretrained: bool = True,
     freeze_backbone: bool = False,
-    dropout: float = 0.25,
 ) -> Tuple[torch.nn.Module, List[str]]:
     seed_everything(seed)
 
@@ -48,7 +63,6 @@ def train_model(
         device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Using device:", device)
 
-    # Stable splits + augment control live in dataset.py
     train_loader, val_loader, test_loader, class_names = load_eurosat_dataset(
         data_dir=data_dir,
         img_size=img_size,
@@ -60,23 +74,27 @@ def train_model(
     model = build_model(
         num_classes=len(class_names),
         model_name=model_name,
-        dropout=dropout,
         pretrained=pretrained,
         freeze_backbone=freeze_backbone,
     ).to(device)
 
-    # Label smoothing is a small but often real win
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
-    optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # If backbone is frozen, Adam will only update params with requires_grad=True (good)
+    optimizer = Adam(
+        (p for p in model.parameters() if p.requires_grad),
+        lr=lr,
+        weight_decay=weight_decay,
+    )
 
     models_dir = PROJECT_ROOT / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save both "best" and "last"
-    best_path = models_dir / "simple_cnn_v2_best.pth"
-    last_path = models_dir / "simple_cnn_v2_last.pth"
-    meta_path = best_path.with_suffix(".meta.pt")
+    run_stem = _make_run_stem(model_name, pretrained, freeze_backbone)
+
+    best_path = models_dir / f"{run_stem}_best.pth"
+    last_path = models_dir / f"{run_stem}_last.pth"
+    meta_path = models_dir / f"{run_stem}_best.meta.pt"
 
     scheduler = ReduceLROnPlateau(
         optimizer,
@@ -93,7 +111,6 @@ def train_model(
     current_lr = get_lr(optimizer)
 
     for epoch in range(epochs):
-        # Training
         model.train()
         running_loss = 0.0
 
@@ -110,7 +127,6 @@ def train_model(
 
         train_loss = running_loss / max(1, len(train_loader))
 
-        # Validation
         model.eval()
         correct = 0
         total = 0
@@ -132,10 +148,9 @@ def train_model(
             f"LR: {current_lr:.2e}"
         )
 
-        # Always save "last"
+        # Save last every epoch
         torch.save(model.state_dict(), last_path)
 
-        # Scheduler step on val metric
         scheduler.step(val_acc)
 
         new_lr = get_lr(optimizer)
@@ -143,7 +158,6 @@ def train_model(
             current_lr = new_lr
             print(f"LR changed -> {current_lr:.2e}")
 
-        # Save best / early stopping
         improved = (val_acc - best_val_acc) > min_delta
 
         if save_best and improved:
@@ -153,6 +167,10 @@ def train_model(
             torch.save(model.state_dict(), best_path)
             torch.save(
                 {
+                    "run_stem": run_stem,
+                    "model_name": model_name,
+                    "pretrained": pretrained,
+                    "freeze_backbone": freeze_backbone,
                     "class_names": class_names,
                     "img_size": img_size,
                     "batch_size": batch_size,
@@ -168,6 +186,7 @@ def train_model(
                 },
                 meta_path,
             )
+
             print(f"Saved BEST model so far to {best_path} (val_acc={best_val_acc:.4f})")
         else:
             epochs_no_improve += 1
@@ -176,7 +195,6 @@ def train_model(
             print(f"Early stopping: no val improvement for {early_stop_patience} epoch(s).")
             break
 
-    # Load best weights back into the returned model
     if save_best and best_path.exists():
         model.load_state_dict(torch.load(best_path, map_location=device))
         model.eval()
